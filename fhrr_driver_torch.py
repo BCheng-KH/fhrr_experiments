@@ -80,7 +80,7 @@ class fhrr_space:
         return torch.exp((a_vec*x)*1j)
     def get_pdf(self, d_vec, e_vecs):
         p_unnormalized = torch.abs(self.similarity_R(d_vec, e_vecs))
-        return p_unnormalized/torch.sum(p_unnormalized)
+        return p_unnormalized/torch.sum(p_unnormalized, axis=1, keepdims=True)
     def get_pdf2(self, d_vec, e_vecs):
         p_unnormalized = self.similarity_C(d_vec, e_vecs)
         p_unnormalized = p_unnormalized * torch.conj(p_unnormalized)
@@ -219,39 +219,29 @@ class block_learning_map:
         self.learn_rate = learn_rate
         self.decay_rate = decay_rate
         if maps == None:
-            self.F_maps = [torch.exp((((torch.rand(self.block_shape[1], self.block_shape[0]) * 2) - 1) * torch.pi)*1j)*learn_rate/10 for _ in range(num_blocks)]
-            self.B_maps = [torch.exp((((torch.rand(self.block_shape[0], self.block_shape[1]) * 2) - 1) * torch.pi)*1j)*learn_rate/10 for _ in range(num_blocks)]
+            self.F_maps = torch.exp((((torch.rand(self.num_blocks, self.block_shape[1], self.block_shape[0]) * 2) - 1) * torch.pi)*1j)*learn_rate/10
+            self.B_maps = torch.exp((((torch.rand(self.num_blocks, self.block_shape[0], self.block_shape[1]) * 2) - 1) * torch.pi)*1j)*learn_rate/10
         else:
             self.F_maps = maps[0]
             self.B_maps = maps[1]
     def learn(self, vec1, vec2):
-        for i in range(self.num_blocks):
-            start1, end1 = self.block_shape[0]*i, self.block_shape[0]*(i+1)
-            start2, end2 = self.block_shape[1]*i, self.block_shape[1]*(i+1)
-            block_vec1 = vec1[start1:end1,:]
-            block_vec2 = vec2[start2:end2,:]
-            block_f_map = block_vec2@self.space1.conj(block_vec1).T
-            block_b_map = block_vec1@self.space2.conj(block_vec2).T
-            self.F_maps[i] = self.F_maps[i]*(1-self.decay_rate) + block_f_map*self.learn_rate
-            self.B_maps[i] = self.B_maps[i]*(1-self.decay_rate) + block_b_map*self.learn_rate
+        block_vec1 = vec1.reshape((self.num_blocks, self.block_shape[0], -1))
+        block_vec2 = vec2.reshape((self.num_blocks, self.block_shape[1], -1))
+        f_maps = torch.einsum("ijk,ilk->ijl", block_vec2, self.space1.conj(block_vec1))
+        b_maps = torch.einsum("ijk,ilk->ijl", block_vec1, self.space2.conj(block_vec2))
+        self.F_maps = self.F_maps*(1-self.decay_rate) + f_maps*self.learn_rate
+        self.B_maps = self.B_maps*(1-self.decay_rate) + b_maps*self.learn_rate
+        
     def forwards(self, vec, normalize = True):
-        out_vecs = []
-        for i in range(self.num_blocks):
-            start1, end1 = self.block_shape[0]*i, self.block_shape[0]*(i+1)
-            start2, end2 = self.block_shape[1]*i, self.block_shape[1]*(i+1)
-            out_vecs.append(self.F_maps[i]@vec[start1:end1,:])
-        out_vec = torch.concat(out_vecs, dim=0)
+        block_vec = vec.reshape((self.num_blocks, self.block_shape[0], -1))
+        out_vec = torch.einsum("ijl,ilm->ijm", self.F_maps, block_vec).reshape((self.dims[1], -1))
         if normalize:
             return self.space2.normalize(out_vec)
         else:
             return out_vec
     def backwards(self, vec, normalize = True):
-        out_vecs = []
-        for i in range(self.num_blocks):
-            start1, end1 = self.block_shape[0]*i, self.block_shape[0]*(i+1)
-            start2, end2 = self.block_shape[1]*i, self.block_shape[1]*(i+1)
-            out_vecs.append(self.B_maps[i]@vec[start2:end2,:])
-        out_vec = torch.concat(out_vecs, dim=0)
+        block_vec = vec.reshape((self.num_blocks, self.block_shape[1], -1))
+        out_vec = torch.einsum("ijl,ilm->ijm", self.B_maps, block_vec).reshape((self.dims[0], -1))
         if normalize:
             return self.space1.normalize(out_vec)
         else:
