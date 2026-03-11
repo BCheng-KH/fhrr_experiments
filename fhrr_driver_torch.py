@@ -285,3 +285,32 @@ class diag_learning_map:
             return self.forwards(vec, normalize = normalize)
         else:
             return self.backwards(vec, normalize = normalize)
+        
+class encoding_map:
+    def __init__(self, dim_in, dim_out, type, std = torch.pi):
+        self.type = type
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+        if self.type == "bundle":
+            self.map = init_random_mat((dim_out, dim_in))
+        elif self.type == "bind":
+            self.map = torch.randn((dim_out, dim_in))*std
+        else:
+            raise NotImplementedError
+    def forward(self, vec):
+        
+        if self.type == "bundle":
+            vec = torch.asarray(vec, dtype=torch.complex128)
+            outvec = self.map@vec
+        elif self.type == "bind":
+            vec = torch.asarray(vec, dtype=torch.double)
+            outvec = torch.exp(self.map@vec * 1j)
+        else:
+            raise NotImplementedError
+        return outvec
+    def backward(self, vec):
+        if self.type == "bundle":
+            outvec = torch.real(torch.conj(self.map).T @ vec)
+        else:
+            raise NotImplementedError
+        return outvec
