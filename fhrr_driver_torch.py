@@ -1,6 +1,7 @@
 import numpy as np
 import tqdm
 import torch
+from scipy.optimize import differential_evolution
 torch.set_default_dtype(torch.double)
 
 SPT = np.sqrt(np.pi)/2
@@ -287,14 +288,15 @@ class diag_learning_map:
             return self.backwards(vec, normalize = normalize)
         
 class encoding_map:
-    def __init__(self, dim_in, dim_out, type, std = torch.pi):
+    def __init__(self, dim_in, encoding_space, type, std = torch.pi):
         self.type = type
         self.dim_in = dim_in
-        self.dim_out = dim_out
+        self.dim_out = encoding_space.dims
+        self.encoding_space = encoding_space
         if self.type == "bundle":
-            self.map = init_random_mat((dim_out, dim_in))
+            self.map = init_random_mat((self.dim_out, dim_in))
         elif self.type == "bind":
-            self.map = torch.randn((dim_out, dim_in))*std
+            self.map = torch.randn((self.dim_out, dim_in))*std
         else:
             raise NotImplementedError
     def forward(self, vec):
@@ -314,3 +316,10 @@ class encoding_map:
         else:
             raise NotImplementedError
         return outvec
+    
+def DE_decode(target, encoding_map):
+    def fitness(x):
+        encoding_space = encoding_map.encoding_space
+        return -encoding_space.similarity_R(target, encoding_map.forward(torch.asarray(np.asarray(x).reshape(-1, 1))))[0, 0]
+    sol = differential_evolution(fitness, [(0, 1) for _ in range(encoding_map.dim_in)], maxiter=50, popsize=20, mutation=(0.1, 1), recombination=0.4, integrality=[True for _ in range(encoding_map.dim_in)])
+    return sol
